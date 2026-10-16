@@ -43,6 +43,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1 -ExtendedTests
 - **`self_test.hpp`** is compiled into `main.cpp` with `NOTEULTRA_TESTING` and run with `--self-test <dir>`. It calls internal functions directly:
   - `command`, `control`, `selectDocument`, `newDocument`, `removeDocument`, `findNext`, `beginReplaceAll`, `saveTo`, `openPath` and `tick`
   - the globals `split`, `secondary`, `dark`, `replacement`, `showMap`, `showList`, `docMap`, `docList` and `mapView`, plus `listRect`, `updateMap` and `mapScrollTo`
+  - for the newer features: `hits`, `openResult`, `showResults`, `resultsPanel`, `resultsView`, `recent`, `exportPdf`, `renderPreview`, `showPreview`, `previewPanel` and `previewView`, plus the line operation and sort command IDs
+  - the PDF export test runs only when the "Microsoft Print to PDF" printer exists
   - the toggle buttons through `BM_SETCHECK`/`BM_GETCHECK`
 - **`io-tests.cpp`** covers `file_io.hpp`.
 - **Before renaming:** keep these IDs, names and behaviours stable, or update the tests in the same change.
@@ -70,9 +72,16 @@ The code uses a dense style with many statements per line and few comments. Matc
      - `NoteUltra.Toolbar` (id 5003; the `tools[]` table)
      - `NoteUltra.Status` (id 5002; clickable `segments`)
      - side panels `NoteUltra.DocList` (id 5004, `docList`; `paintList`, `layoutList`, `listProc`) and `NoteUltra.Map` (id 5005, `docMap`), each with a title-bar close button (`paintHeader`/`headerMouse`). The map is a nested `Scintilla` (`mapView`, subclassed by `mapProc`) that shares the active document's pointer at zoom -10. Its translucent inactive selection marks the editor's visible lines (`updateMap`), and a hidden map releases the document (`syncMap`).
-     - the find bar: borderless EDIT controls inside boxes painted by `paintMain`, plus `BS_OWNERDRAW` buttons subclassed by `buttonProc` for hover and check state
+     - `NoteUltra.Results` (id 5006, `resultsPanel`): Find All output in a nested read-only `Scintilla` (`resultsView`). `hits[]` maps each results line to a document and match (line 0 is the header, file lines have `start=-1`); `openResult` jumps there. Styles 1–3 and indicator 8 colour it (`configureResults`).
+    - `NoteUltra.Preview` (id 5007, `previewPanel`): the Markdown preview, a RichEdit (`RICHEDIT50W` from msftedit.dll) fed RTF from `markdown.hpp`. Only shown when `previewShown()` (setting on and the active document's lexer is `markdown`). `schedulePreview(delay)` debounces renders through `tick()`; `syncPreview` follows the editor's vertical scroll; `EN_LINK` goes to `previewLink`.
+    - the find bar: borderless EDIT controls inside boxes painted by `paintMain`, plus `BS_OWNERDRAW` buttons subclassed by `buttonProc` for hover and check state
   6. `refresh()` runs from the 40 ms timer when `refreshNeeded` is set. It uses string "signatures" to repaint the chrome only when something changed.
   7. `layout()`, `applyAppearance()` (theme, fonts, brushes, editor colours), `command()`, the menu, settings, `windowProc`, `shortcut()` and `wWinMain`.
+- **Between bookmarks and the chrome** (before `cancelWork`) sit:
+  - line operations: `transformLines` (selected lines, or the whole document), `sortLines(kind,descending)`, `lineCommand`. Sort IDs are `SortBase+kind*2+descending`.
+  - recent files: `recent` (10, saved under `[Recent]` as File1..File10), `closedFiles`, `fillFileMenu()` (the File menu is rebuilt on `WM_INITMENUPOPUP`).
+  - printing: `printTo` formats through a hidden `Scintilla` view with the light palette (`SCI_FORMATRANGEFULL`); `exportPdf` prints to the "Microsoft Print to PDF" printer with `DOCINFO.lpszOutput`.
+- **`markdown.hpp`** — `markdownToRtf` (CommonMark blocks, GFM tables, strikethrough, autolinks) for the preview. Link text is not parsed for further links (`inLink`), which keeps URL autolinks from recursing.
 - **`theme.hpp`** — `Palette`/`makePalette` (Windows 11 colours; the accent comes from the registry), plus:
   - dark-mode plumbing:
     - uxtheme ordinals 133, 135 and 136
@@ -106,7 +115,7 @@ The code uses a dense style with many statements per line and few comments. Matc
 - **New editor setting:**
   1. Apply it in `paintEditor()` or `configure()`. Both run again for every editor in `applyAppearance()`.
   2. Persist it in `loadSettings()`/`saveSettings()`.
-- **Settings:** stored in `%LOCALAPPDATA%\NoteUltra\settings.ini` under `[View]`, with the keys Theme (0 system, 1 light, 2 dark), Wrap, Toolbar, StatusBar, FontSize, DocumentMap and DocumentList. The legacy `Dark=` key is still read when `Theme` is missing.
+- **Settings:** stored in `%LOCALAPPDATA%\NoteUltra\settings.ini` under `[View]`, with the keys Theme (0 system, 1 light, 2 dark), Wrap, Toolbar, StatusBar, FontSize, DocumentMap, DocumentList and MarkdownPreview. The recent files list is under `[Recent]`. The legacy `Dark=` key is still read when `Theme` is missing.
 - **Chrome state rule:** state computed during layout, such as hit rectangles, must not be rebuilt in `refresh()` unless that same call lays it out again. A status bar bug came from exactly this; see the `segments` handling.
 - **Keyboard routing:** the message loop skips `IsDialogMessage` while an editor has focus, so Scintilla receives Tab and Enter. Global shortcuts live in `shortcut()`.
 - **Dialogs:** they stay standard Windows dialogs, and the save prompt is a TaskDialog loaded dynamically. On Windows builds before 17763 (1809), popup menus stay light.
@@ -115,5 +124,6 @@ The code uses a dense style with many statements per line and few comments. Matc
 
 - **Windows 11 redesign:** it covers every part of the UI listed under Code layout, plus dark mode end to end (title bar, menus, scrollbars, tooltips). The toolbar sun/moon button switches themes, and so does View > Theme. All three test suites pass.
 - **Document Map and Document List** (View menu, toolbar, commands 1316/1317) were added after the redesign; the panels have fixed widths and cannot be resized, and the list cannot be sorted or reordered.
-- **Not built yet** (the README "Current scope" section lists them): find in files, macros, session restore and autosave, printing, plugins, and tab drag-to-reorder.
+- **Recent files, Markdown preview (1318), Search Results/Find All (1319, 1209, 1210), printing and PDF export (1011–1013), and Edit > Line operations (1150–1183)** were added next. They are covered by the self-tests and checked through screenshots; printing to a physical printer, the print dialog, and link clicks in the preview were not exercised.
+- **Not built yet** (the README "Current scope" section lists them): find in files, macros, session restore and autosave, plugins, and tab drag-to-reorder.
 - **Not verified:** CMake builds; per-monitor DPI changes; and hover, click and menu behaviour on a live desktop, since the redesign was only checked through screenshots.

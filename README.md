@@ -22,6 +22,11 @@ The portable ZIP can also be extracted directly into any folder. Copy the files 
 - Split view editing the same document in two panes.
 - Document Map (View > Document map): a zoomed-out view of the whole document beside the editor, with the visible lines highlighted. Click or drag on it to scroll; the mouse wheel scrolls the editor.
 - Document List (View > Document list): a side panel listing every open document with its folder and unsaved-change dot. Click to switch, middle-click or the hover close button to close, right-click for the tab menu.
+- Markdown preview (View > Markdown preview): a rendered view beside the editor for Markdown documents, with headings, emphasis, lists and task lists, quotes, code blocks, GitHub tables and links. It updates as you type and follows the editor's scrolling. Web links open in the browser; relative links to files open in a tab.
+- Search Results panel (F7): Find all in the current document or in all open tabs (the find bar buttons, or the Search menu) lists every matching line with the matches highlighted. Double-click a line or press Enter to jump to it.
+- Recent files in the File menu (the last 10), plus Restore recent closed file, Open all recent files, and Empty recent files list.
+- Printing (File > Print, Print now) with a header, page numbers and print-friendly colours, and File > Export as PDF through the built-in Microsoft Print to PDF printer.
+- Edit > Line operations, as in Notepad++: duplicate, remove duplicate or consecutive duplicate lines, split and join, move up and down, remove empty or blank lines, insert blank lines, reverse, randomize, and sort (lexicographic, ignoring case, locale order, integers, decimals with comma or dot, and length, ascending or descending). They act on the selected lines, or on the whole document when nothing spans lines.
 - Undo/redo, duplicate line/selection, delete line, indent/unindent, uppercase/lowercase selection.
 - Find next/previous with wrap, case and whole-word options, Scintilla regular expressions, Replace, and cooperative Replace All grouped into one undo action.
 - Go to line, word wrap, whitespace display, and zoom.
@@ -42,6 +47,11 @@ The portable ZIP can also be extracted directly into any folder. Copy the files 
 | Next / previous match | F3 / Shift+F3 |
 | Toggle / next bookmark | Ctrl+F2 / F2 |
 | Keyword completion | Ctrl+Space |
+| Print / restore closed file | Ctrl+P / Ctrl+Shift+T |
+| Search Results panel | F7 |
+| Split / join lines | Ctrl+I / Ctrl+J |
+| Move line up / down | Ctrl+Shift+Up / Ctrl+Shift+Down |
+| Insert blank line above / below | Ctrl+Alt+Enter / Ctrl+Alt+Shift+Enter |
 | Duplicate line or selection | Ctrl+D |
 | Uppercase / lowercase selection | Ctrl+Shift+U / Ctrl+U |
 | Split view / Word wrap | Ctrl+Alt+S / Alt+Z |
@@ -62,7 +72,7 @@ UTF-8 without a BOM is validated before loading. If invalid and the system ANSI 
 
 ## Current scope
 
-This is a functional first release of the core editor, not full Notepad++ feature parity. It does not include a plugin manager, macros, folder workspace tree, find-in-files, session restoration, crash recovery/autosave, compare tools, printing, LSP, or a terminal. Unsaved documents require a normal save before closing. Back up important documents independently, as with any new editor.
+This is a functional first release of the core editor, not full Notepad++ feature parity. It does not include a plugin manager, macros, folder workspace tree, find-in-files, session restoration, crash recovery/autosave, compare tools, LSP, or a terminal. Unsaved documents require a normal save before closing. Back up important documents independently, as with any new editor.
 
 The menu bar is dark-themed through undocumented Windows menu-drawing messages and the `uxtheme` preferred-app-mode API, as used by Windows Terminal and Notepad++. On Windows 10 builds before 1809, popup menus and common dialogs keep the light system style. The open/save dialogs and message boxes are always standard Windows dialogs. Theme, toolbar, status bar, Document Map, Document List, wrap, and font-size preferences are stored in `%LOCALAPPDATA%\NoteUltra\settings.ini` when available. There are no built-in analytics, telemetry, update requests, or cloud services.
 
