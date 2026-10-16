@@ -132,9 +132,10 @@ void requestClose(std::shared_ptr<Document> d){if(!d)return;
         if(choice==IDCANCEL){closingAll=false;exitAfterClose=false;return;}if(choice==IDYES){if(saveDocument(d)){d->closeAfter=true;}else{closingAll=false;exitAfterClose=false;}return;}}
     removeDocument(d);
 }
-void closeAllStep(){if(!closingAll)return;
-    while(!documents.empty()){auto d=current();if(!d){selectDocument(0);d=current();}size_t count=documents.size();requestClose(d);if(!closingAll||documents.size()==count)return;}
-    bool quit=exitAfterClose;closingAll=false;exitAfterClose=false;if(quit)DestroyWindow(window);else newDocument();
+// The save prompt and Save As dialog pump messages, so the timer can call back in here; a nested call would stack another prompt.
+void closeAllStep(){static bool running=false;if(!closingAll||running)return;running=true;
+    while(!documents.empty()){auto d=current();if(!d){selectDocument(0);d=current();}size_t count=documents.size();requestClose(d);if(!closingAll||documents.size()==count){running=false;return;}}
+    running=false;bool quit=exitAfterClose;closingAll=false;exitAfterClose=false;if(quit)DestroyWindow(window);else newDocument();
 }
 void showFind(bool replace=false,bool go=false){findVisible=true;layout();HWND h=editor();if(h&&!go){auto a=sci(h,SCI_GETSELECTIONSTART),b=sci(h,SCI_GETSELECTIONEND);if(b>a&&b-a<2048){std::string s((size_t)(b-a)+1,'\0');sci(h,SCI_GETSELTEXT,0,(LPARAM)&s[0]);s.resize((size_t)(b-a));if(s.find_first_of("\r\n")==s.npos)SetWindowTextW(control(FindField),widen(s).c_str());}}
     SetFocus(control(go?GoToText:(replace?ReplaceField:FindField)));SendMessageW(GetFocus(),EM_SETSEL,0,-1);
