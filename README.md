@@ -20,6 +20,8 @@ The portable ZIP can also be extracted directly into any folder. Copy the files 
 - Syntax highlighting for C/C++, JavaScript/TypeScript, Python, JSON, HTML, XML, CSS, SQL, shell, Markdown, YAML, Rust, Java/C#, PowerShell, and INI/properties. Language selection is automatic by extension or manual from the menu. Some grouped languages use a shared lexer and are not full language-service implementations.
 - Line numbers, code folding, bookmarks, indentation guides, brace matching, multi-caret editing, and keyword completion.
 - Split view editing the same document in two panes.
+- Document Map (View > Document map): a zoomed-out view of the whole document beside the editor, with the visible lines highlighted. Click or drag on it to scroll; the mouse wheel scrolls the editor.
+- Document List (View > Document list): a side panel listing every open document with its folder and unsaved-change dot. Click to switch, middle-click or the hover close button to close, right-click for the tab menu.
 - Undo/redo, duplicate line/selection, delete line, indent/unindent, uppercase/lowercase selection.
 - Find next/previous with wrap, case and whole-word options, Scintilla regular expressions, Replace, and cooperative Replace All grouped into one undo action.
 - Go to line, word wrap, whitespace display, and zoom.
@@ -62,7 +64,7 @@ UTF-8 without a BOM is validated before loading. If invalid and the system ANSI 
 
 This is a functional first release of the core editor, not full Notepad++ feature parity. It does not include a plugin manager, macros, folder workspace tree, find-in-files, session restoration, crash recovery/autosave, compare tools, printing, LSP, or a terminal. Unsaved documents require a normal save before closing. Back up important documents independently, as with any new editor.
 
-The menu bar is dark-themed through undocumented Windows menu-drawing messages and the `uxtheme` preferred-app-mode API, as used by Windows Terminal and Notepad++. On Windows 10 builds before 1809, popup menus and common dialogs keep the light system style. The open/save dialogs and message boxes are always standard Windows dialogs. Theme, toolbar, status bar, wrap, and font-size preferences are stored in `%LOCALAPPDATA%\NoteUltra\settings.ini` when available. There are no built-in analytics, telemetry, update requests, or cloud services.
+The menu bar is dark-themed through undocumented Windows menu-drawing messages and the `uxtheme` preferred-app-mode API, as used by Windows Terminal and Notepad++. On Windows 10 builds before 1809, popup menus and common dialogs keep the light system style. The open/save dialogs and message boxes are always standard Windows dialogs. Theme, toolbar, status bar, Document Map, Document List, wrap, and font-size preferences are stored in `%LOCALAPPDATA%\NoteUltra\settings.ini` when available. There are no built-in analytics, telemetry, update requests, or cloud services.
 
 ## Build and checks
 

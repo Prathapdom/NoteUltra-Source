@@ -1,2 +1,2 @@
-PASS: real Scintilla controls, tabs, syntax styling, split view, undo/redo, find, regex, grouped replace-all, bookmarks, EOL conversion, UTF8/UTF16 roundtrips, async loader/save, atomic replacement, external-change protection, themes, wrap, large-file mode.
-Large-file background load: 22020096 bytes in 125 ms (synthetic warm-cache fixture).
+PASS: real Scintilla controls, tabs, syntax styling, split view, document map, document list, undo/redo, find, regex, grouped replace-all, bookmarks, EOL conversion, UTF8/UTF16 roundtrips, async loader/save, atomic replacement, external-change protection, themes, wrap, large-file mode.
+Large-file background load: 22020096 bytes in 156 ms (synthetic warm-cache fixture).

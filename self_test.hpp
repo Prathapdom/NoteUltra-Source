@@ -14,6 +14,14 @@ int selfTests(const std::wstring& directory){
         command(LanguageBase+1);sci(first->editor,SCI_COLOURISE,0,-1);require(sci(first->editor,SCI_GETSTYLEAT,0)==SCE_C_WORD,"C++ syntax lexer styles keywords");
         command(Split);require(split&&sci(secondary,SCI_GETDOCPOINTER)==sci(first->editor,SCI_GETDOCPOINTER),"split panes share document");command(Split);
         newDocument();auto second=current();set(second->editor,"alpha alpha\nBeta\n");selectDocument(0);require(contents(first->editor).find("42")!=std::string::npos,"tab preserves contents");selectDocument(1);
+        auto shown=[](HWND h){return (GetWindowLongPtrW(h,GWL_STYLE)&WS_VISIBLE)!=0;};
+        command(DocumentMap);require(showMap&&shown(docMap)&&sci(mapView,SCI_GETDOCPOINTER)==sci(second->editor,SCI_GETDOCPOINTER),"document map shows the active document");
+        {std::string lines;for(int i=0;i<2000;++i)lines+="line "+std::to_string(i)+"\n";set(second->editor,lines);sci(second->editor,SCI_SETFIRSTVISIBLELINE,1000);updateMap();
+            require(sci(mapView,SCI_GETSELECTIONSTART)==sci(mapView,SCI_POSITIONFROMLINE,1000),"document map marks the visible lines");mapScrollTo(0);require(sci(second->editor,SCI_GETFIRSTVISIBLELINE)<1000,"clicking the document map scrolls the editor");
+            set(second->editor,"alpha alpha\nBeta\n");}
+        selectDocument(0);require(sci(mapView,SCI_GETDOCPOINTER)==sci(first->editor,SCI_GETDOCPOINTER),"document map follows the active tab");
+        command(DocumentList);require(showList&&shown(docList),"document list shown");{RECT r=listRect(1);SendMessageW(docList,WM_LBUTTONDOWN,0,MAKELPARAM(r.left+px(20),(r.top+r.bottom)/2));}require(active==1,"document list click selects document");
+        command(DocumentMap);command(DocumentList);require(!showMap&&!shown(docMap)&&!showList&&!shown(docList),"side panels hide");
         SetWindowTextW(control(FindField),L"alpha");require(findNext(),"find first match");require(sci(second->editor,SCI_GETSELECTIONSTART)==0,"first match position");require(findNext(),"find second match");require(sci(second->editor,SCI_GETSELECTIONSTART)==6,"second match position");
         SetWindowTextW(control(ReplaceField),L"omega");beginReplaceAll();pump([]{return !replacement;});require(contents(second->editor)=="omega omega\nBeta\n","replace all");command(Undo);require(contents(second->editor)=="alpha alpha\nBeta\n","replace all is one undo action");
         SendMessageW(control(Regex),BM_SETCHECK,BST_CHECKED,0);SetWindowTextW(control(FindField),L"^Beta$");require(findNext(),"regex search");SendMessageW(control(Regex),BM_SETCHECK,BST_UNCHECKED,0);
@@ -29,7 +37,7 @@ int selfTests(const std::wstring& directory){
         require(raw(path)=="external changes"&&dirty(opened),"external edit conflict preserves file and unsaved edits");command(Undo);require(contents(opened->editor)=="constexpr int count = 7;\n","undo works after background loading");
         std::wstring largePath=directory+L"\\large.txt";{Handle f(CreateFileW(largePath.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,0,nullptr));require((bool)f,"create large file");std::string block;for(int i=0;i<16384;++i)block+="background text line\n";for(int i=0;i<64;++i)writeAll(f.value,block.data(),block.size());}
         auto start=GetTickCount64();openPath(largePath);auto large=current();pump([&]{return large->busy==Busy::None;});require(large->large&&sci(large->editor,SCI_GETLENGTH)>16*1024*1024,"large-file mode");
-        report="PASS: real Scintilla controls, tabs, syntax styling, split view, undo/redo, find, regex, grouped replace-all, bookmarks, EOL conversion, UTF8/UTF16 roundtrips, async loader/save, atomic replacement, external-change protection, themes, wrap, large-file mode.\r\n";
+        report="PASS: real Scintilla controls, tabs, syntax styling, split view, document map, document list, undo/redo, find, regex, grouped replace-all, bookmarks, EOL conversion, UTF8/UTF16 roundtrips, async loader/save, atomic replacement, external-change protection, themes, wrap, large-file mode.\r\n";
         report+="Large-file background load: "+std::to_string(sci(large->editor,SCI_GETLENGTH))+" bytes in "+std::to_string(GetTickCount64()-start)+" ms (synthetic warm-cache fixture).\r\n";
     }catch(const std::exception&e){report="FAIL: "+std::string(e.what())+"\r\n";code=1;}
     if(trace)fclose(trace);FILE*f=_wfopen((directory+L"\\ui-test-results.txt").c_str(),L"wb");if(f){fwrite(report.data(),1,report.size(),f);fclose(f);}else code=1;

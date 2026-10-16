@@ -36,12 +36,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1 -ExtendedTests
   - window class `NoteUltra.Main`
   - visible `Scintilla` child windows
   - command IDs 1001, 1003, 1006, 1201 and 1305
+  - only `Scintilla` windows whose parent is the main window, so the Document Map's nested view is ignored
   - `GetDlgItem(app,5001)` (the tab strip) answering `TCM_GETITEMCOUNT`
   - 5101 being the Find field
   - 5103 (Next) and 5110 (HideFind)
 - **`self_test.hpp`** is compiled into `main.cpp` with `NOTEULTRA_TESTING` and run with `--self-test <dir>`. It calls internal functions directly:
   - `command`, `control`, `selectDocument`, `newDocument`, `removeDocument`, `findNext`, `beginReplaceAll`, `saveTo`, `openPath` and `tick`
-  - the globals `split`, `secondary`, `dark` and `replacement`
+  - the globals `split`, `secondary`, `dark`, `replacement`, `showMap`, `showList`, `docMap`, `docList` and `mapView`, plus `listRect`, `updateMap` and `mapScrollTo`
   - the toggle buttons through `BM_SETCHECK`/`BM_GETCHECK`
 - **`io-tests.cpp`** covers `file_io.hpp`.
 - **Before renaming:** keep these IDs, names and behaviours stable, or update the tests in the same change.
@@ -68,6 +69,7 @@ The code uses a dense style with many statements per line and few comments. Matc
      - `NoteUltra.Tabs` (id 5001; `paintTabs`, `layoutTabs`, `tabsProc`)
      - `NoteUltra.Toolbar` (id 5003; the `tools[]` table)
      - `NoteUltra.Status` (id 5002; clickable `segments`)
+     - side panels `NoteUltra.DocList` (id 5004, `docList`; `paintList`, `layoutList`, `listProc`) and `NoteUltra.Map` (id 5005, `docMap`), each with a title-bar close button (`paintHeader`/`headerMouse`). The map is a nested `Scintilla` (`mapView`, subclassed by `mapProc`) that shares the active document's pointer at zoom -10. Its translucent inactive selection marks the editor's visible lines (`updateMap`), and a hidden map releases the document (`syncMap`).
      - the find bar: borderless EDIT controls inside boxes painted by `paintMain`, plus `BS_OWNERDRAW` buttons subclassed by `buttonProc` for hover and check state
   6. `refresh()` runs from the 40 ms timer when `refreshNeeded` is set. It uses string "signatures" to repaint the chrome only when something changed.
   7. `layout()`, `applyAppearance()` (theme, fonts, brushes, editor colours), `command()`, the menu, settings, `windowProc`, `shortcut()` and `wWinMain`.
@@ -104,7 +106,7 @@ The code uses a dense style with many statements per line and few comments. Matc
 - **New editor setting:**
   1. Apply it in `paintEditor()` or `configure()`. Both run again for every editor in `applyAppearance()`.
   2. Persist it in `loadSettings()`/`saveSettings()`.
-- **Settings:** stored in `%LOCALAPPDATA%\NoteUltra\settings.ini` under `[View]`, with the keys Theme (0 system, 1 light, 2 dark), Wrap, Toolbar, StatusBar and FontSize. The legacy `Dark=` key is still read when `Theme` is missing.
+- **Settings:** stored in `%LOCALAPPDATA%\NoteUltra\settings.ini` under `[View]`, with the keys Theme (0 system, 1 light, 2 dark), Wrap, Toolbar, StatusBar, FontSize, DocumentMap and DocumentList. The legacy `Dark=` key is still read when `Theme` is missing.
 - **Chrome state rule:** state computed during layout, such as hit rectangles, must not be rebuilt in `refresh()` unless that same call lays it out again. A status bar bug came from exactly this; see the `segments` handling.
 - **Keyboard routing:** the message loop skips `IsDialogMessage` while an editor has focus, so Scintilla receives Tab and Enter. Global shortcuts live in `shortcut()`.
 - **Dialogs:** they stay standard Windows dialogs, and the save prompt is a TaskDialog loaded dynamically. On Windows builds before 17763 (1809), popup menus stay light.
@@ -112,5 +114,6 @@ The code uses a dense style with many statements per line and few comments. Matc
 ## Current state
 
 - **Windows 11 redesign:** it covers every part of the UI listed under Code layout, plus dark mode end to end (title bar, menus, scrollbars, tooltips). The toolbar sun/moon button switches themes, and so does View > Theme. All three test suites pass.
+- **Document Map and Document List** (View menu, toolbar, commands 1316/1317) were added after the redesign; the panels have fixed widths and cannot be resized, and the list cannot be sorted or reordered.
 - **Not built yet** (the README "Current scope" section lists them): find in files, macros, session restore and autosave, printing, plugins, and tab drag-to-reorder.
 - **Not verified:** CMake builds; per-monitor DPI changes; and hover, click and menu behaviour on a live desktop, since the redesign was only checked through screenshots.

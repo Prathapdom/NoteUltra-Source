@@ -4,7 +4,7 @@
 #include <iostream>
 DWORD target=0;HWND app=nullptr,view=nullptr;
 BOOL CALLBACK mainWindow(HWND h,LPARAM){DWORD pid=0;GetWindowThreadProcessId(h,&pid);wchar_t cls[100]{};GetClassNameW(h,cls,100);if(pid==target&&wcscmp(cls,L"NoteUltra.Main")==0){app=h;return FALSE;}return TRUE;}
-BOOL CALLBACK editorWindow(HWND h,LPARAM){wchar_t cls[100]{};GetClassNameW(h,cls,100);if(wcscmp(cls,L"Scintilla")==0&&(GetWindowLongPtrW(h,GWL_STYLE)&WS_VISIBLE)){view=h;return FALSE;}return TRUE;}
+BOOL CALLBACK editorWindow(HWND h,LPARAM){wchar_t cls[100]{};GetClassNameW(h,cls,100);if(wcscmp(cls,L"Scintilla")==0&&GetParent(h)==app&&(GetWindowLongPtrW(h,GWL_STYLE)&WS_VISIBLE)){view=h;return FALSE;}return TRUE;}
 void require(bool ok,const char* s){if(!ok)throw std::runtime_error(s);}
 void command(int id){SendMessageW(app,WM_COMMAND,id,0);}
 LRESULT call(UINT msg,WPARAM w=0,LPARAM l=0){return SendMessageW(view,msg,w,l);}
@@ -29,7 +29,7 @@ int wmain(int argc,wchar_t**argv){if(argc==3)return largeTest(argv[1],argv[2]);P
     call(SCI_GOTOPOS,0);SendMessageW(view,WM_CHAR,'x',0);require(call(SCI_GETMODIFY)!=0,"editing marks loaded document dirty");call(SCI_UNDO);require(call(SCI_GETLENGTH)==16&&call(SCI_GETMODIFY)==0,"undo returns loaded savepoint");call(SCI_REDO);require(call(SCI_GETMODIFY)!=0,"redo restores edit");
     command(1003);require(waitFor([]{return call(SCI_GETMODIFY)==0&&call(SCI_GETREADONLY)==0;}),"release async save succeeds");
     {nu::Handle f(CreateFileW(fixture.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,0,nullptr));require((bool)f,"read saved fixture");char bytes[32]{};DWORD n=0;require(ReadFile(f.value,bytes,32,&n,nullptr)&&std::string(bytes,n)=="xint value = 42;\n","release save wrote expected bytes");}
-    command(1305);int visible=0;EnumChildWindows(app,[](HWND h,LPARAM p)->BOOL{wchar_t cls[100]{};GetClassNameW(h,cls,100);if(wcscmp(cls,L"Scintilla")==0&&(GetWindowLongPtrW(h,GWL_STYLE)&WS_VISIBLE))++*(int*)p;return TRUE;},(LPARAM)&visible);require(visible==2,"split view shows both editors");command(1305);
+    command(1305);int visible=0;EnumChildWindows(app,[](HWND h,LPARAM p)->BOOL{wchar_t cls[100]{};GetClassNameW(h,cls,100);if(wcscmp(cls,L"Scintilla")==0&&GetParent(h)==app&&(GetWindowLongPtrW(h,GWL_STYLE)&WS_VISIBLE))++*(int*)p;return TRUE;},(LPARAM)&visible);require(visible==2,"split view shows both editors");command(1305);
     command(1001);require(SendMessageW(GetDlgItem(app,5001),TCM_GETITEMCOUNT,0,0)==2,"new tab");command(1006);require(SendMessageW(GetDlgItem(app,5001),TCM_GETITEMCOUNT,0,0)==1,"close clean tab");
     DWORD_PTR response=0;require(SendMessageTimeoutW(app,WM_NULL,0,0,SMTO_ABORTIFHUNG,500,&response)!=0,"UI responds");PostMessageW(app,WM_CLOSE,0,0);require(WaitForSingleObject(pi.hProcess,5000)==WAIT_OBJECT_0,"clean shutdown");DWORD code=1;GetExitCodeProcess(pi.hProcess,&code);require(code==0,"release process exit code");CloseHandle(pi.hProcess);pi.hProcess=nullptr;DeleteFileW(fixture.c_str());
     std::cout<<"PASS: release executable launch, command-line async load, undo tracking, find, edit/undo/redo, async save with exact bytes, split view, tabs, responsiveness, clean shutdown\n";return 0;

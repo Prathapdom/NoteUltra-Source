@@ -18,9 +18,9 @@ enum Command {
  New=1001,Open,Save,SaveAs,SaveAll,Close,CloseAll,Exit,CopyPath,RevealPath,
  Undo=1101,Redo,Cut,Copy,Paste,SelectAll,Duplicate,DeleteLine,Upper,Lower,Indent,Unindent,
  Find=1201,Replace,FindNext,FindPrevious,GoTo,Bookmark,NextBookmark,Complete,
- Wrap=1301,Whitespace,LineNumbers,Dark,Split,ZoomIn,ZoomOut,ZoomReset,FoldAll,ExpandAll,ShowToolbar,ShowStatus,ThemeSystem,ThemeLight,ThemeDark,
+ Wrap=1301,Whitespace,LineNumbers,Dark,Split,ZoomIn,ZoomOut,ZoomReset,FoldAll,ExpandAll,ShowToolbar,ShowStatus,ThemeSystem,ThemeLight,ThemeDark,DocumentMap,DocumentList,
  AutoLanguage=2999,LanguageBase=3000,EncodingBase=4000,EolBase=4100,About=4200,
- Tabs=5001,Status,Toolbar,
+ Tabs=5001,Status,Toolbar,ListPanel,MapPanel,
  FindField=5101,ReplaceField,NextButton,PreviousButton,ReplaceButton,ReplaceAllButton,MatchCase,WholeWord,Regex,HideFind,GoToText,GoToButton,CancelWork
 };
 enum class Busy {None,Loading,Saving,Replacing};
@@ -39,7 +39,7 @@ HINSTANCE instance=nullptr;HMODULE scintillaDLL=nullptr,lexillaDLL=nullptr;Lexil
 std::vector<std::shared_ptr<Document>> documents;std::vector<std::unique_ptr<Job>> jobs;std::unique_ptr<ReplaceTask> replacement;
 std::thread ioThread;std::mutex ioMutex;std::condition_variable ioReady;std::deque<Job*> ioQueue;bool ioShutdown=false;
 int active=-1;unsigned nextNumber=0;bool dark=false,wrap=false,whitespace=false,lineNumbers=true,split=false,findVisible=false,showToolbar=true,showStatus=true;
-bool closingAll=false,exitAfterClose=false,testMode=false,refreshNeeded=true;int fontSize=11,dpi=96;Theme theme=Theme::System;Palette pal=makePalette(false);
+bool showMap=false,showList=false,closingAll=false,exitAfterClose=false,testMode=false,refreshNeeded=true;int fontSize=11,dpi=96;Theme theme=Theme::System;Palette pal=makePalette(false);
 HFONT uiFont=nullptr,statusFont=nullptr,iconFont=nullptr,smallIcons=nullptr,tinyIcons=nullptr;HBRUSH fieldBrush=nullptr,focusBrush=nullptr;int fieldTextHeight=18;
 std::wstring notice=L"Ready",settingsPath;
 Sci_Position lastZero=-1;std::string lastQuery;
@@ -47,7 +47,7 @@ void startIO(){ioThread=std::thread([]{while(true){Job* job=nullptr;{std::unique
 void submit(std::unique_ptr<Job> job){Job* ptr=job.get();jobs.push_back(std::move(job));{std::lock_guard<std::mutex> lock(ioMutex);ioQueue.push_back(ptr);}ioReady.notify_one();}
 void stopIO(){{std::lock_guard<std::mutex> lock(ioMutex);ioShutdown=true;}ioReady.notify_one();if(ioThread.joinable())ioThread.join();}
 LRESULT CALLBACK windowProc(HWND,UINT,WPARAM,LPARAM);
-void layout();void refresh();void applyAppearance();void closeAllStep();void requestClose(std::shared_ptr<Document>);void selectDocument(int);void newDocument();void tick();void command(int);void layoutTabs(bool reveal=true);
+void layout();void refresh();void applyAppearance();void closeAllStep();void requestClose(std::shared_ptr<Document>);void selectDocument(int);void newDocument();void tick();void command(int);void layoutTabs(bool reveal=true);void layoutList(bool reveal=true);void syncMap();void updateMap();
 int px(int n){return MulDiv(n,dpi,96);}
 HWND control(int id){return GetDlgItem(window,id);}
 std::wstring getText(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(n+1,L'\0');GetWindowTextW(h,&s[0],n+1);s.resize(n);return s;}
@@ -73,7 +73,7 @@ void configure(HWND h){
 }
 // Scintilla uses standard window scrollbars, which the dark Explorer theme recolours.
 HWND createEditor(){HWND h=CreateWindowExW(0,L"Scintilla",L"",WS_CHILD|WS_TABSTOP|WS_CLIPCHILDREN,0,0,100,100,window,nullptr,instance,nullptr);if(!h)throw std::runtime_error("Cannot create editor control");themeControl(h,dark);configure(h);return h;}
-void syncSplit(){auto d=current();if(!d||!secondary)return;sci(secondary,SCI_SETDOCPOINTER,0,sci(d->editor,SCI_GETDOCPOINTER));sci(secondary,SCI_SETREADONLY,d->busy!=Busy::None);configure(secondary);colorLanguage(secondary,d->large?0:d->language,createLexer,dark,false);ShowWindow(secondary,split?SW_SHOW:SW_HIDE);}
+void syncSplit(){auto d=current();if(!d||!secondary)return;sci(secondary,SCI_SETDOCPOINTER,0,sci(d->editor,SCI_GETDOCPOINTER));sci(secondary,SCI_SETREADONLY,d->busy!=Busy::None);configure(secondary);colorLanguage(secondary,d->large?0:d->language,createLexer,dark,false);ShowWindow(secondary,split?SW_SHOW:SW_HIDE);syncMap();}
 void tabsChanged(){layoutTabs();refreshNeeded=true;}
 void selectDocument(int index){if(index<0||index>=(int)documents.size())return;auto old=current();if(old&&old!=documents[index])ShowWindow(old->editor,SW_HIDE);active=index;ShowWindow(documents[index]->editor,SW_SHOW);syncSplit();layout();tabsChanged();SetFocus(documents[index]->editor);lastZero=-1;}
 std::shared_ptr<Document> makeDocument(const std::wstring& path=L""){
@@ -232,7 +232,7 @@ void layoutTabs(bool reveal){if(!tabControl)return;RECT rc;GetClientRect(tabCont
     int s=px(32),cy=(top+rc.bottom)/2,plusX=std::min(x,left+room)+px(4);plusRect={plusX,cy-s/2,plusX+s,cy-s/2+s};
     for(int i=0;i<tabTips;++i)dropTip(tabControl,100+i);dropTip(tabControl,99);
     tabTips=(int)tabRects.size();for(int i=0;i<tabTips;++i){RECT r=tabRects[i];r.left=std::max<LONG>(r.left,left);r.right=std::min<LONG>(r.right,left+room);if(r.right>r.left)addTip(tabControl,100+i,r,LPSTR_TEXTCALLBACKW);}
-    addTip(tabControl,99,plusRect,L"New tab (Ctrl+N)");InvalidateRect(tabControl,nullptr,FALSE);}
+    addTip(tabControl,99,plusRect,L"New tab (Ctrl+N)");InvalidateRect(tabControl,nullptr,FALSE);layoutList(reveal);}
 int hitTab(POINT p){if(p.x<tabsLeft()||p.x>=tabsRight())return -1;for(int i=0;i<(int)tabRects.size();++i)if(PtInRect(&tabRects[i],p))return i;return -1;}
 void paintTabs(HDC target){RECT rc;GetClientRect(tabControl,&rc);Buffer b(target,rc);fill(b.dc,rc,pal.chrome);
     int left=tabsLeft(),right=tabsRight();HRGN clip=CreateRectRgn(left-px(8),0,right+px(8),rc.bottom);SelectClipRgn(b.dc,clip);
@@ -251,10 +251,10 @@ void paintTabs(HDC target){RECT rc;GetClientRect(tabControl,&rc);Buffer b(target
         if(closeHot==i||((i==active||i==tabHot)&&!dirty(d)))drawGlyph(b.dc,0xE8BB,box,i==active||closeHot==i?pal.text:pal.textSecondary,tinyIcons);}
     SelectClipRgn(b.dc,nullptr);DeleteObject(clip);
     drawGlyph(b.dc,0xE710,plusRect,plusHot?pal.text:pal.textSecondary,smallIcons);}
-void tabMenu(int index,POINT pt){selectDocument(index);auto d=current();HMENU m=CreatePopupMenu();
+void tabMenu(int index,POINT pt,HWND owner=tabControl){selectDocument(index);auto d=current();HMENU m=CreatePopupMenu();
     AppendMenuW(m,MF_STRING,Close,L"Close\tCtrl+W");AppendMenuW(m,MF_STRING,CloseAll,L"Close all");AppendMenuW(m,MF_SEPARATOR,0,nullptr);
     AppendMenuW(m,MF_STRING|(d&&!d->path.empty()?0:MF_GRAYED),CopyPath,L"Copy full path");AppendMenuW(m,MF_STRING|(d&&!d->path.empty()?0:MF_GRAYED),RevealPath,L"Open containing folder");
-    popup(m,tabControl,{pt.x,pt.y,pt.x,pt.y},false);}
+    popup(m,owner,{pt.x,pt.y,pt.x,pt.y},false);}
 LRESULT CALLBACK tabsProc(HWND h,UINT msg,WPARAM wp,LPARAM lp){switch(msg){
 case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);paintTabs(dc);EndPaint(h,&ps);return 0;}
 case WM_ERASEBKGND:return 1;
@@ -279,13 +279,13 @@ case TCM_GETCURSEL:return active;
 struct Tool{int id;wchar_t glyph;const wchar_t* tip;};
 const Tool tools[]={{New,0xE8A5,L"New (Ctrl+N)"},{Open,0xE8E5,L"Open (Ctrl+O)"},{Save,0xE74E,L"Save (Ctrl+S)"},{SaveAll,0xE78C,L"Save all"},{0,0,nullptr},
     {Cut,0xE8C6,L"Cut (Ctrl+X)"},{Copy,0xE8C8,L"Copy (Ctrl+C)"},{Paste,0xE77F,L"Paste (Ctrl+V)"},{0,0,nullptr},{Undo,0xE7A7,L"Undo (Ctrl+Z)"},{Redo,0xE7A6,L"Redo (Ctrl+Y)"},{0,0,nullptr},
-    {Find,0xE721,L"Find (Ctrl+F)"},{Replace,0xE8AC,L"Replace (Ctrl+H)"},{0,0,nullptr},{Wrap,0xE751,L"Word wrap (Alt+Z)"},{Split,0xE89A,L"Split editor (Ctrl+Alt+S)"},{0,0,nullptr},
+    {Find,0xE721,L"Find (Ctrl+F)"},{Replace,0xE8AC,L"Replace (Ctrl+H)"},{0,0,nullptr},{Wrap,0xE751,L"Word wrap (Alt+Z)"},{Split,0xE89A,L"Split editor (Ctrl+Alt+S)"},{DocumentList,0xE90C,L"Document list"},{DocumentMap,0xE90D,L"Document map"},{0,0,nullptr},
     {ZoomIn,0xE8A3,L"Zoom in (Ctrl++)"},{ZoomOut,0xE71F,L"Zoom out (Ctrl+-)"},{Dark,0,L"Switch light / dark theme"}};
 constexpr int toolCount=sizeof(tools)/sizeof(tools[0]);
 RECT toolRects[toolCount];int toolHot=-1,toolDown=-1;std::wstring toolSignature;bool toolTipsAdded=false;
 bool toolEnabled(int id){auto d=current();HWND h=editor();if(!d||!h)return false;bool idle=d->busy==Busy::None;
     switch(id){case Save:return idle;case Undo:return idle&&sci(h,SCI_CANUNDO);case Redo:return idle&&sci(h,SCI_CANREDO);case Cut:return idle&&!sci(h,SCI_GETSELECTIONEMPTY);case Copy:return !sci(h,SCI_GETSELECTIONEMPTY);case Paste:return idle&&sci(h,SCI_CANPASTE);default:return true;}}
-bool toolChecked(int id){return (id==Wrap&&wrap)||(id==Split&&split);}
+bool toolChecked(int id){return (id==Wrap&&wrap)||(id==Split&&split)||(id==DocumentList&&showList)||(id==DocumentMap&&showMap);}
 void layoutTools(){if(!toolBar)return;RECT rc;GetClientRect(toolBar,&rc);int x=px(8),size=px(32),y=(rc.bottom-1-size)/2;
     for(int i=0;i<toolCount;++i){if(tools[i].id==Dark)toolRects[i]={rc.right-px(8)-size,y,rc.right-px(8),y+size};else if(!tools[i].id){toolRects[i]={x+px(4),y+px(8),x+px(5),y+size-px(8)};x+=px(9);}else{toolRects[i]={x,y,x+size,y+size};x+=size+px(2);}
         if(tools[i].id){if(!toolTipsAdded)addTip(toolBar,i,toolRects[i],tools[i].tip);else{TOOLINFOW t{};t.cbSize=sizeof(t);t.hwnd=toolBar;t.uId=i;t.rect=toolRects[i];SendMessageW(tooltip,TTM_NEWTOOLRECTW,0,(LPARAM)&t);}}}
@@ -308,6 +308,107 @@ case WM_MOUSELEAVE:toolHot=-1;InvalidateRect(h,nullptr,FALSE);return 0;
 case WM_LBUTTONDOWN:case WM_LBUTTONDBLCLK:{toolDown=hitTool(mousePoint(lp));if(toolDown>=0)SetCapture(h);InvalidateRect(h,nullptr,FALSE);return 0;}
 case WM_LBUTTONUP:{int down=toolDown;toolDown=-1;if(GetCapture()==h)ReleaseCapture();InvalidateRect(h,nullptr,FALSE);if(down>=0&&down==hitTool(mousePoint(lp))&&toolEnabled(tools[down].id))command(tools[down].id);return 0;}
 case WM_CAPTURECHANGED:toolDown=-1;InvalidateRect(h,nullptr,FALSE);return 0;
+}return DefWindowProcW(h,msg,wp,lp);}
+
+// Side panels, as in Notepad++: the Document List on the left and the Document Map on the right.
+// Each has a title bar with a close button.
+HWND docList=nullptr,docMap=nullptr,mapView=nullptr;struct PanelHead{bool hot=false,down=false;}listHead,mapHead;
+int listScroll=0,listHot=-1,listCloseHot=-1,listCloseDown=-1;
+int panelHeader(){return px(36);}
+RECT panelClose(HWND h){RECT rc;GetClientRect(h,&rc);int s=px(28),cy=panelHeader()/2,right=h==docList?rc.right-1:rc.right;return {right-px(6)-s,cy-s/2,right-px(6),cy-s/2+s};}
+void paintHeader(HDC dc,HWND h,const wchar_t* title,const PanelHead& head){RECT box=panelClose(h);drawText(dc,title,{px(14),0,box.left-px(4),panelHeader()},pal.text,uiFont);
+    if(head.hot){Canvas c(dc);c.round(box,(float)px(4),head.down?pal.pressed(pal.chrome):pal.hover(pal.chrome));}drawGlyph(dc,0xE8BB,box,head.hot?pal.text:pal.textSecondary,tinyIcons);}
+// Title-bar close button; returns true when the message belongs to it.
+bool headerMouse(HWND h,UINT msg,LPARAM lp,PanelHead& head,int toggle){POINT p=mousePoint(lp);RECT box=panelClose(h);bool in=PtInRect(&box,p)!=0;
+    switch(msg){case WM_MOUSEMOVE:if(in!=head.hot){head.hot=in;InvalidateRect(h,&box,FALSE);}return in;
+    case WM_LBUTTONDOWN:if(in){head.down=true;SetCapture(h);InvalidateRect(h,&box,FALSE);}return in;
+    case WM_LBUTTONUP:if(head.down){head.down=false;if(GetCapture()==h)ReleaseCapture();InvalidateRect(h,&box,FALSE);if(in)command(toggle);return true;}return false;}return false;}
+
+// Document List: one row per tab, in tab order, with the folder under the name.
+int listRow(){return px(44);}
+int listTop(){return panelHeader()+px(2);}
+RECT listRect(int i){RECT rc;GetClientRect(docList,&rc);int y=listTop()+i*listRow()-listScroll;return {px(6),y,rc.right-1-px(6),y+listRow()};}
+RECT listCloseBox(const RECT& r){int s=px(24),cy=(r.top+r.bottom)/2;return {r.right-px(6)-s,cy-s/2,r.right-px(6),cy-s/2+s};}
+int hitList(POINT p){if(p.y<listTop())return -1;for(int i=0;i<(int)documents.size();++i){RECT r=listRect(i);if(PtInRect(&r,p))return i;}return -1;}
+void layoutList(bool reveal){if(!docList)return;RECT rc;GetClientRect(docList,&rc);int room=std::max(0,(int)rc.bottom-listTop()-px(4)),row=listRow();
+    if(reveal&&active>=0){int top=active*row;if(top<listScroll)listScroll=top;if(top+row>listScroll+room)listScroll=top+row-room;}
+    listScroll=std::clamp(listScroll,0,std::max(0,(int)documents.size()*row-room));InvalidateRect(docList,nullptr,FALSE);}
+std::wstring folderOf(const std::shared_ptr<Document>& d){if(d->path.empty())return L"Not saved";auto p=d->path.find_last_of(L"\\/");return p==d->path.npos?d->path:d->path.substr(0,p);}
+void paintList(HDC target){RECT rc;GetClientRect(docList,&rc);Buffer b(target,rc);fill(b.dc,rc,pal.chrome);fill(b.dc,{rc.right-1,0,rc.right,rc.bottom},pal.divider);paintHeader(b.dc,docList,L"Document List",listHead);
+    HRGN clip=CreateRectRgn(0,listTop(),rc.right-1,rc.bottom);SelectClipRgn(b.dc,clip);
+    {Canvas c(b.dc);c.g.SetClip(Gdiplus::Rect(0,listTop(),rc.right-1,rc.bottom-listTop()));
+        for(int i=0;i<(int)documents.size();++i){RECT r=listRect(i);if(r.bottom<listTop()||r.top>rc.bottom)continue;
+        if(i==active||i==listHot)c.round(r,(float)px(4),i==active&&i==listHot?pal.hover(pal.hover(pal.chrome)):pal.hover(pal.chrome));
+        if(i==active){int cy=(r.top+r.bottom)/2;c.round({r.left,cy-px(8),r.left+px(3),cy+px(8)},(float)px(1),pal.accent);}
+        RECT box=listCloseBox(r);if(i==listCloseHot)c.round(box,(float)px(4),listCloseDown==i?pal.pressed(pal.hover(pal.chrome)):pal.hover(pal.hover(pal.chrome)));
+        else if(dirty(documents[i])&&i!=listHot)c.dot((box.left+box.right)/2.0f,(box.top+box.bottom)/2.0f,(float)px(4),i==active?pal.text:pal.textSecondary);}}
+    for(int i=0;i<(int)documents.size();++i){RECT r=listRect(i);if(r.bottom<listTop()||r.top>rc.bottom)continue;auto& d=documents[i];RECT box=listCloseBox(r);int mid=(r.top+r.bottom)/2;
+        drawText(b.dc,tabTitle(d),{r.left+px(14),r.top+px(3),box.left-px(4),mid+px(1)},i==active?pal.text:pal.textSecondary,uiFont);
+        drawText(b.dc,folderOf(d),{r.left+px(14),mid+px(1),box.left-px(4),r.bottom-px(4)},pal.textSecondary,statusFont,DT_SINGLELINE|DT_VCENTER|DT_LEFT|DT_PATH_ELLIPSIS|DT_NOPREFIX);
+        if(i==listHot)drawGlyph(b.dc,0xE8BB,box,i==listCloseHot?pal.text:pal.textSecondary,tinyIcons);}
+    SelectClipRgn(b.dc,nullptr);DeleteObject(clip);}
+LRESULT CALLBACK listProc(HWND h,UINT msg,WPARAM wp,LPARAM lp){switch(msg){
+case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);paintList(dc);EndPaint(h,&ps);return 0;}
+case WM_ERASEBKGND:return 1;
+case WM_SIZE:layoutList(false);return 0;
+case WM_MOUSEMOVE:{POINT p=mousePoint(lp);bool head=headerMouse(h,msg,lp,listHead,DocumentList);int row=head?-1:hitList(p),close=-1;if(row>=0){RECT box=listCloseBox(listRect(row));if(PtInRect(&box,p))close=row;}
+    if(row!=listHot||close!=listCloseHot){listHot=row;listCloseHot=close;InvalidateRect(h,nullptr,FALSE);}trackLeave(h);return 0;}
+case WM_MOUSELEAVE:listHot=listCloseHot=-1;listHead.hot=false;InvalidateRect(h,nullptr,FALSE);return 0;
+case WM_LBUTTONDOWN:case WM_LBUTTONDBLCLK:{if(headerMouse(h,WM_LBUTTONDOWN,lp,listHead,DocumentList))return 0;int row=hitList(mousePoint(lp));if(row>=0&&row==listCloseHot){listCloseDown=row;SetCapture(h);InvalidateRect(h,nullptr,FALSE);}else if(row>=0)selectDocument(row);return 0;}
+case WM_LBUTTONUP:{if(headerMouse(h,msg,lp,listHead,DocumentList))return 0;int down=listCloseDown;listCloseDown=-1;if(GetCapture()==h)ReleaseCapture();InvalidateRect(h,nullptr,FALSE);if(down>=0&&down==listCloseHot&&down<(int)documents.size())requestClose(documents[down]);return 0;}
+case WM_CAPTURECHANGED:listCloseDown=-1;listHead.down=false;InvalidateRect(h,nullptr,FALSE);return 0;
+case WM_MBUTTONUP:{int row=hitList(mousePoint(lp));if(row>=0)requestClose(documents[row]);return 0;}
+case WM_RBUTTONUP:{POINT p=mousePoint(lp);int row=hitList(p);if(row>=0)tabMenu(row,p,h);return 0;}
+case WM_MOUSEWHEEL:listScroll-=GET_WHEEL_DELTA_WPARAM(wp)*listRow()*3/WHEEL_DELTA;layoutList(false);return 0;
+}return DefWindowProcW(h,msg,wp,lp);}
+
+// Document Map: a zoomed-out Scintilla view sharing the active document. Instead of the
+// separate overlay window Notepad++ uses, the map's own selection, drawn translucently under
+// the text, marks the lines the editor shows; the map never has focus, so it is the
+// inactive selection colour.
+void configureMap(){if(!mapView)return;auto d=current();paintEditor(mapView,pal,false,false,false,fontSize,dpi);if(d)colorLanguage(mapView,d->large?0:d->language,createLexer,dark,false);
+    for(int m=0;m<5;++m)sci(mapView,SCI_SETMARGINWIDTHN,m,0);sci(mapView,SCI_SETMARGINLEFT,0,px(4));sci(mapView,SCI_SETMARGINRIGHT,0,0);
+    sci(mapView,SCI_SETZOOM,-10);sci(mapView,SCI_SETEXTRAASCENT,0);sci(mapView,SCI_SETEXTRADESCENT,0);sci(mapView,SCI_SETCARETLINEVISIBLE,0);sci(mapView,SCI_SETCARETLINEVISIBLEALWAYS,0);sci(mapView,SCI_SETCARETSTYLE,CARETSTYLE_INVISIBLE);
+    sci(mapView,SCI_SETHSCROLLBAR,0);sci(mapView,SCI_SETVSCROLLBAR,0);sci(mapView,SCI_SETINDENTATIONGUIDES,SC_IV_NONE);sci(mapView,SCI_SETSELEOLFILLED,1);sci(mapView,SCI_SETSELECTIONLAYER,SC_LAYER_UNDER_TEXT);
+    for(int e:{SC_ELEMENT_SELECTION_BACK,SC_ELEMENT_SELECTION_INACTIVE_BACK})element(mapView,e,pal.text,pal.dark?0x30:0x22);
+    for(int e:{SC_ELEMENT_SELECTION_TEXT,SC_ELEMENT_SELECTION_INACTIVE_TEXT})sci(mapView,SCI_RESETELEMENTCOLOUR,e);}
+void syncMap(){if(!mapView)return;auto d=current();sptr_t doc=showMap&&d?sci(d->editor,SCI_GETDOCPOINTER):0;
+    // A hidden map lets go of the document so that closed tabs are freed.
+    if(!doc){if(GetPropW(mapView,L"NU.doc")){sci(mapView,SCI_SETDOCPOINTER,0,0);RemovePropW(mapView,L"NU.doc");}return;}
+    if(sci(mapView,SCI_GETDOCPOINTER)!=doc)sci(mapView,SCI_SETDOCPOINTER,0,doc);SetPropW(mapView,L"NU.doc",(HANDLE)1);configureMap();updateMap();}
+struct MapGeometry{Sci_Position total,mapLines,first,shown;double k;};
+MapGeometry mapGeometry(HWND h){MapGeometry v{};v.total=sci(mapView,SCI_GETLINECOUNT);v.mapLines=sci(mapView,SCI_LINESONSCREEN);auto top=sci(h,SCI_GETFIRSTVISIBLELINE);
+    v.first=sci(h,SCI_DOCLINEFROMVISIBLE,top);v.shown=std::max<Sci_Position>(1,sci(h,SCI_DOCLINEFROMVISIBLE,top+std::max<Sci_Position>(1,sci(h,SCI_LINESONSCREEN))-1)-v.first+1);
+    // The map scrolls in proportion to the editor so that both reach the end together.
+    v.k=v.total>v.mapLines?(double)(v.total-v.mapLines)/std::max<Sci_Position>(1,v.total-v.shown):0;return v;}
+void updateMap(){HWND h=editor();if(!mapView||!showMap||!h||!GetPropW(mapView,L"NU.doc"))return;auto v=mapGeometry(h);
+    auto last=v.first+v.shown;sci(mapView,SCI_SETSEL,sci(mapView,SCI_POSITIONFROMLINE,v.first),last<v.total?sci(mapView,SCI_POSITIONFROMLINE,last):sci(mapView,SCI_GETLENGTH));
+    sci(mapView,SCI_SETFIRSTVISIBLELINE,std::clamp<Sci_Position>((Sci_Position)(v.first*std::min(v.k,1.0)+0.5),0,std::max<Sci_Position>(0,v.total-v.mapLines)));sci(mapView,SCI_SETXOFFSET,0);}
+// Clicking or dragging on the map centres the editor on that point.
+void mapScrollTo(int y){HWND h=editor();if(!h||!GetPropW(mapView,L"NU.doc"))return;auto v=mapGeometry(h);int lh=std::max(1,(int)sci(mapView,SCI_TEXTHEIGHT,0));RECT rc;GetClientRect(mapView,&rc);
+    double target=v.k<0.999?((double)y/lh-v.shown/2.0)/(1-v.k):(double)y*v.total/std::max<LONG>(1,rc.bottom)-v.shown/2.0;
+    auto line=std::clamp<Sci_Position>((Sci_Position)(target+0.5),0,std::max<Sci_Position>(0,v.total-1));sci(h,SCI_SETFIRSTVISIBLELINE,sci(h,SCI_VISIBLEFROMDOCLINE,line));updateMap();}
+// The map never takes focus or edits; mouse input scrolls the editor instead.
+LRESULT CALLBACK mapProc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR,DWORD_PTR){switch(msg){
+case WM_LBUTTONDOWN:case WM_LBUTTONDBLCLK:SetCapture(h);mapScrollTo(mousePoint(lp).y);return 0;
+case WM_MOUSEMOVE:if(GetCapture()==h)mapScrollTo(mousePoint(lp).y);return 0;
+case WM_LBUTTONUP:if(GetCapture()==h)ReleaseCapture();return 0;
+case WM_RBUTTONDOWN:case WM_RBUTTONUP:case WM_RBUTTONDBLCLK:case WM_MBUTTONDOWN:case WM_MBUTTONUP:case WM_MBUTTONDBLCLK:case WM_CONTEXTMENU:case WM_KEYDOWN:case WM_KEYUP:case WM_CHAR:case WM_SYSCHAR:return 0;
+case WM_MOUSEWHEEL:case WM_MOUSEHWHEEL:if(editor())SendMessageW(editor(),msg,wp,lp);return 0;
+case WM_SETCURSOR:SetCursor(LoadCursorW(nullptr,IDC_ARROW));return TRUE;
+case WM_SETFOCUS:if(editor())SetFocus(editor());return 0;
+case WM_NCDESTROY:RemovePropW(h,L"NU.doc");RemoveWindowSubclass(h,mapProc,1);break;
+}return DefSubclassProc(h,msg,wp,lp);}
+void paintMapPanel(HDC target){RECT rc;GetClientRect(docMap,&rc);Buffer b(target,rc);fill(b.dc,rc,pal.chrome);fill(b.dc,{0,0,1,rc.bottom},pal.divider);paintHeader(b.dc,docMap,L"Document Map",mapHead);}
+LRESULT CALLBACK mapPanelProc(HWND h,UINT msg,WPARAM wp,LPARAM lp){switch(msg){
+case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);paintMapPanel(dc);EndPaint(h,&ps);return 0;}
+case WM_ERASEBKGND:return 1;
+case WM_SIZE:{RECT rc;GetClientRect(h,&rc);if(mapView)MoveWindow(mapView,1,panelHeader(),std::max<int>(1,rc.right-1),std::max<int>(1,rc.bottom-panelHeader()),TRUE);updateMap();InvalidateRect(h,nullptr,FALSE);return 0;}
+case WM_MOUSEMOVE:headerMouse(h,msg,lp,mapHead,DocumentMap);trackLeave(h);return 0;
+case WM_LBUTTONDOWN:case WM_LBUTTONUP:headerMouse(h,msg,lp,mapHead,DocumentMap);return 0;
+case WM_MOUSELEAVE:if(mapHead.hot){mapHead.hot=false;InvalidateRect(h,nullptr,FALSE);}return 0;
+case WM_CAPTURECHANGED:mapHead.down=false;InvalidateRect(h,nullptr,FALSE);return 0;
+case WM_NOTIFY:return 0;
 }return DefWindowProcW(h,msg,wp,lp);}
 
 // Status bar: text segments on the right open the matching menu when clicked, as in Notepad.
@@ -377,7 +478,7 @@ void paintMain(HDC target){RECT rc;GetClientRect(window,&rc);Buffer b(target,rc)
         for(auto& bx:boxes){bool focused=GetFocus()==control(bx.id);c.round(bx.rc,r,focused?pal.fieldFocus:pal.field);c.outline(bx.rc,r,pal.fieldBorder);c.bottomEdge(bx.rc,r,focused?pal.accent:pal.fieldBottom,focused?px(2):1);}}}
 
 void refresh(){refreshNeeded=false;auto d=current();if(!d)return;
-    std::wstring tabs;for(auto& doc:documents)tabs+=tabTitle(doc)+(dirty(doc)?L"*":L"")+L"\n";tabs+=std::to_wstring(active);if(tabs!=tabSignature){tabSignature=tabs;layoutTabs();}
+    std::wstring tabs;for(auto& doc:documents)tabs+=tabTitle(doc)+(dirty(doc)?L"*":L"")+doc->path+L"\n";tabs+=std::to_wstring(active);if(tabs!=tabSignature){tabSignature=tabs;layoutTabs();}
     auto title=(dirty(d)?L"● ":L"")+(d->path.empty()?d->title:d->path)+L" - NoteUltra";SetWindowTextW(window,title.c_str());
     HWND h=editor();auto pos=sci(h,SCI_GETCURRENTPOS),line=sci(h,SCI_LINEFROMPOSITION,pos),column=sci(h,SCI_GETCOLUMN,pos);auto selection=sci(h,SCI_GETSELECTIONEND)-sci(h,SCI_GETSELECTIONSTART);
     auto position=L"Ln "+std::to_wstring(line+1)+L", Col "+std::to_wstring(column+1);if(selection)position+=L" ("+std::to_wstring(selection)+L" selected)";
@@ -388,7 +489,7 @@ void refresh(){refreshNeeded=false;auto d=current();if(!d)return;
     std::wstring status=message;for(auto& s:next)status+=L"\n"+s.text;if(status!=statusSignature){statusSignature=status;statusMessage=message;segments=std::move(next);layoutStatus();}
     toolsChanged();fitLineNumbers(d->editor,lineNumbers,dpi);if(split)fitLineNumbers(secondary,lineNumbers,dpi);
     bool busy=replacement||d->busy==Busy::Loading;if(findVisible&&(IsWindowVisible(control(CancelWork))!=0)!=busy)ShowWindow(control(CancelWork),busy?SW_SHOW:SW_HIDE);
-    for(auto pair:{std::pair<int,bool>{Wrap,wrap},{Whitespace,whitespace},{LineNumbers,lineNumbers},{Split,split},{ShowToolbar,showToolbar},{ShowStatus,showStatus}})checkMenu(pair.first,pair.second);
+    for(auto pair:{std::pair<int,bool>{Wrap,wrap},{Whitespace,whitespace},{LineNumbers,lineNumbers},{Split,split},{ShowToolbar,showToolbar},{ShowStatus,showStatus},{DocumentMap,showMap},{DocumentList,showList}})checkMenu(pair.first,pair.second);
     CheckMenuRadioItem(GetMenu(window),ThemeSystem,ThemeDark,ThemeSystem+(int)theme,MF_BYCOMMAND);markMenu(GetMenu(window));
     EnableMenuItem(GetMenu(window),Save,MF_BYCOMMAND|(d->busy==Busy::None?MF_ENABLED:MF_GRAYED));EnableMenuItem(GetMenu(window),Undo,MF_BYCOMMAND|(d->busy==Busy::None&&sci(h,SCI_CANUNDO)?MF_ENABLED:MF_GRAYED));EnableMenuItem(GetMenu(window),Redo,MF_BYCOMMAND|(d->busy==Busy::None&&sci(h,SCI_CANREDO)?MF_ENABLED:MF_GRAYED));
     EnableWindow(control(ReplaceButton),d->busy==Busy::None);EnableWindow(control(ReplaceAllButton),d->busy==Busy::None);
@@ -398,7 +499,7 @@ HMENU menu(){HMENU bar=CreateMenu();auto popup=[&](const wchar_t* name,HMENU m=n
     HMENU e=popup(L"&Edit");item(e,Undo,L"&Undo\tCtrl+Z");item(e,Redo,L"&Redo\tCtrl+Y");separator(e);item(e,Cut,L"Cu&t\tCtrl+X");item(e,Copy,L"&Copy\tCtrl+C");item(e,Paste,L"&Paste\tCtrl+V");item(e,SelectAll,L"Select &all\tCtrl+A");separator(e);item(e,Duplicate,L"&Duplicate line / selection\tCtrl+D");item(e,DeleteLine,L"Delete &line\tCtrl+Shift+L");item(e,Upper,L"UPPERCASE selection\tCtrl+Shift+U");item(e,Lower,L"lowercase selection\tCtrl+U");item(e,Indent,L"&Indent\tTab");item(e,Unindent,L"U&nindent\tShift+Tab");separator(e);AppendMenuW(e,MF_POPUP,(UINT_PTR)eolMenu(),L"Line &endings");
     HMENU s=popup(L"&Search");item(s,Find,L"&Find…\tCtrl+F");item(s,Replace,L"&Replace…\tCtrl+H");item(s,FindNext,L"Find &next\tF3");item(s,FindPrevious,L"Find &previous\tShift+F3");item(s,GoTo,L"&Go to line…\tCtrl+G");separator(s);item(s,Bookmark,L"Toggle &bookmark\tCtrl+F2");item(s,NextBookmark,L"Next boo&kmark\tF2");item(s,Complete,L"&Complete keyword\tCtrl+Space");
     HMENU v=popup(L"&View");HMENU themes=CreatePopupMenu();item(themes,ThemeSystem,L"Use &system setting");item(themes,ThemeLight,L"&Light");item(themes,ThemeDark,L"&Dark");AppendMenuW(v,MF_POPUP,(UINT_PTR)themes,L"&Theme");
-    item(v,ShowToolbar,L"T&oolbar");item(v,ShowStatus,L"Status &bar");separator(v);item(v,Wrap,L"&Word wrap\tAlt+Z");item(v,Whitespace,L"Show w&hitespace");item(v,LineNumbers,L"&Line numbers");item(v,Split,L"S&plit editor\tCtrl+Alt+S");separator(v);item(v,ZoomIn,L"Zoom &in\tCtrl++");item(v,ZoomOut,L"Zoom &out\tCtrl+-");item(v,ZoomReset,L"&Reset zoom\tCtrl+0");separator(v);item(v,FoldAll,L"&Fold all");item(v,ExpandAll,L"&Expand all");
+    item(v,ShowToolbar,L"T&oolbar");item(v,ShowStatus,L"Status &bar");separator(v);item(v,Wrap,L"&Word wrap\tAlt+Z");item(v,Whitespace,L"Show w&hitespace");item(v,LineNumbers,L"&Line numbers");item(v,Split,L"S&plit editor\tCtrl+Alt+S");separator(v);item(v,DocumentList,L"Document &list");item(v,DocumentMap,L"Document &map");separator(v);item(v,ZoomIn,L"Zoom &in\tCtrl++");item(v,ZoomOut,L"Zoom &out\tCtrl+-");item(v,ZoomReset,L"&Reset zoom\tCtrl+0");separator(v);item(v,FoldAll,L"&Fold all");item(v,ExpandAll,L"&Expand all");
     popup(L"E&ncoding",encodingMenu());popup(L"&Language",languageMenu());
     HMENU help=popup(L"&Help");item(help,About,L"&About NoteUltra");return bar;
 }
@@ -407,8 +508,10 @@ void layout(){if(!window||!tabControl)return;RECT client;GetClientRect(window,&c
     ShowWindow(toolBar,showToolbar?SW_SHOW:SW_HIDE);if(showToolbar){MoveWindow(toolBar,0,y,w,px(40)+1,TRUE);y+=px(40)+1;}
     int statusHeight=showStatus?px(30):0;ShowWindow(statusBar,showStatus?SW_SHOW:SW_HIDE);if(showStatus)MoveWindow(statusBar,0,h-statusHeight,w,statusHeight,TRUE);
     int panel=findVisible?px(90):0,bottom=std::max(y+1,h-statusHeight-panel);
-    auto d=current();if(d){if(split){int half=(w-1)/2;MoveWindow(d->editor,0,y,half,bottom-y,TRUE);splitter={half,y,half+1,bottom};MoveWindow(secondary,half+1,y,w-half-1,bottom-y,TRUE);}else MoveWindow(d->editor,0,y,w,bottom-y,TRUE);}
-    layoutFind(bottom,w);InvalidateRect(window,nullptr,FALSE);
+    int left=showList?std::min(px(240),w/3):0,right=showMap?std::min(px(170),w/4):0,x=left,width=std::max(1,w-left-right);
+    ShowWindow(docList,showList?SW_SHOW:SW_HIDE);if(showList)MoveWindow(docList,0,y,left,bottom-y,TRUE);ShowWindow(docMap,showMap?SW_SHOW:SW_HIDE);if(showMap)MoveWindow(docMap,w-right,y,right,bottom-y,TRUE);
+    auto d=current();if(d){if(split){int half=(width-1)/2;MoveWindow(d->editor,x,y,half,bottom-y,TRUE);splitter={x+half,y,x+half+1,bottom};MoveWindow(secondary,x+half+1,y,width-half-1,bottom-y,TRUE);}else MoveWindow(d->editor,x,y,width,bottom-y,TRUE);}
+    layoutFind(bottom,w);updateMap();InvalidateRect(window,nullptr,FALSE);
 }
 void createFonts(){for(HFONT f:{uiFont,statusFont,iconFont,smallIcons,tinyIcons})if(f)DeleteObject(f);
     static const wchar_t* face=fontExists(L"Segoe UI Variable Text")?L"Segoe UI Variable Text":L"Segoe UI";static const wchar_t* icons=fontExists(L"Segoe Fluent Icons")?L"Segoe Fluent Icons":L"Segoe MDL2 Assets";
@@ -421,7 +524,7 @@ void applyAppearance(){dark=theme==Theme::Dark||(theme==Theme::System&&systemUse
     for(HBRUSH b:{fieldBrush,focusBrush})if(b)DeleteObject(b);fieldBrush=CreateSolidBrush(pal.field);focusBrush=CreateSolidBrush(pal.fieldFocus);
     for(int id:{FindField,ReplaceField,GoToText})themeControl(control(id),dark,L"DarkMode_CFD");
     for(auto d:documents){themeControl(d->editor,dark);paintEditor(d->editor,pal,lineNumbers,whitespace,wrap,fontSize,dpi);colorLanguage(d->editor,d->large?0:d->language,createLexer,dark,false);}
-    if(secondary){themeControl(secondary,dark);paintEditor(secondary,pal,lineNumbers,whitespace,wrap,fontSize,dpi);if(current())colorLanguage(secondary,current()->large?0:current()->language,createLexer,dark,false);}
+    configureMap();if(secondary){themeControl(secondary,dark);paintEditor(secondary,pal,lineNumbers,whitespace,wrap,fontSize,dpi);if(current())colorLanguage(secondary,current()->large?0:current()->language,createLexer,dark,false);}
     toolSignature.clear();statusSignature.clear();tabSignature.clear();layoutTools();
     DrawMenuBar(window);RedrawWindow(window,nullptr,nullptr,RDW_INVALIDATE|RDW_FRAME|RDW_ALLCHILDREN);refreshNeeded=true;
 }
@@ -443,6 +546,7 @@ void command(int id){auto d=current();HWND h=editor();
     case Dark:theme=dark?Theme::Light:Theme::Dark;applyAppearance();break;case ThemeSystem:case ThemeLight:case ThemeDark:theme=(Theme)(id-ThemeSystem);applyAppearance();break;
     case Wrap:wrap=!wrap;applyAppearance();break;case Whitespace:whitespace=!whitespace;applyAppearance();break;case LineNumbers:lineNumbers=!lineNumbers;applyAppearance();break;
     case ShowToolbar:showToolbar=!showToolbar;layout();break;case ShowStatus:showStatus=!showStatus;layout();break;
+    case DocumentMap:showMap=!showMap;syncMap();layout();break;case DocumentList:showList=!showList;layout();layoutList();break;
     case Split:split=!split;syncSplit();layout();tell(split?L"Split view: both panes edit the same document.":L"Single editor view.");break;
     case ZoomIn:case ZoomOut:case ZoomReset:fontSize=id==ZoomReset?11:std::max(8,std::min(32,fontSize+(id==ZoomIn?1:-1)));applyAppearance();break;
     case FoldAll:if(h)sci(h,SCI_FOLDALL,SC_FOLDACTION_CONTRACT);break;case ExpandAll:if(h)sci(h,SCI_FOLDALL,SC_FOLDACTION_EXPAND);break;
@@ -453,12 +557,14 @@ void command(int id){auto d=current();HWND h=editor();
 }
 void loadSettings(){if(testMode)return;PWSTR local=nullptr;if(SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData,0,nullptr,&local))){settingsPath=std::wstring(local)+L"\\NoteUltra";CoTaskMemFree(local);CreateDirectoryW(settingsPath.c_str(),nullptr);settingsPath+=L"\\settings.ini";
         auto get=[](const wchar_t* key,int fallback){return (int)GetPrivateProfileIntW(L"View",key,fallback,settingsPath.c_str());};
-        int legacy=get(L"Dark",-1),saved=get(L"Theme",legacy<0?0:(legacy?2:1));theme=(Theme)std::max(0,std::min(2,saved));wrap=get(L"Wrap",0)!=0;showToolbar=get(L"Toolbar",1)!=0;showStatus=get(L"StatusBar",1)!=0;fontSize=std::max(8,std::min(32,get(L"FontSize",11)));}}
+        int legacy=get(L"Dark",-1),saved=get(L"Theme",legacy<0?0:(legacy?2:1));theme=(Theme)std::max(0,std::min(2,saved));wrap=get(L"Wrap",0)!=0;showToolbar=get(L"Toolbar",1)!=0;showStatus=get(L"StatusBar",1)!=0;fontSize=std::max(8,std::min(32,get(L"FontSize",11)));showMap=get(L"DocumentMap",0)!=0;showList=get(L"DocumentList",0)!=0;}}
 void saveSettings(){if(testMode||settingsPath.empty())return;auto set=[](const wchar_t* key,int value){WritePrivateProfileStringW(L"View",key,std::to_wstring(value).c_str(),settingsPath.c_str());};
-    set(L"Theme",(int)theme);set(L"Wrap",wrap);set(L"Toolbar",showToolbar);set(L"StatusBar",showStatus);set(L"FontSize",fontSize);}
+    set(L"Theme",(int)theme);set(L"Wrap",wrap);set(L"Toolbar",showToolbar);set(L"StatusBar",showStatus);set(L"FontSize",fontSize);set(L"DocumentMap",showMap);set(L"DocumentList",showList);}
 void buildControls(){dpi=dpiOf(window);dark=theme==Theme::Dark||(theme==Theme::System&&systemUsesDark());pal=makePalette(dark);createFonts();
     tooltip=CreateWindowExW(WS_EX_TOPMOST,TOOLTIPS_CLASSW,nullptr,WS_POPUP|TTS_ALWAYSTIP|TTS_NOPREFIX,0,0,0,0,window,nullptr,instance,nullptr);SendMessageW(tooltip,TTM_SETMAXTIPWIDTH,0,px(600));SendMessageW(tooltip,WM_SETFONT,(WPARAM)statusFont,TRUE);
     tabControl=add(L"NoteUltra.Tabs",L"Documents",0,Tabs);toolBar=add(L"NoteUltra.Toolbar",L"Commands",0,Toolbar);statusBar=add(L"NoteUltra.Status",L"Status",0,Status);
+    docList=add(L"NoteUltra.DocList",L"Document List",0,ListPanel);docMap=add(L"NoteUltra.Map",L"Document Map",WS_CLIPCHILDREN,MapPanel);
+    mapView=CreateWindowExW(0,L"Scintilla",L"",WS_CHILD|WS_VISIBLE,0,0,10,10,docMap,nullptr,instance,nullptr);if(mapView){RevokeDragDrop(mapView);SetWindowSubclass(mapView,mapProc,1,0);sci(mapView,SCI_SETTECHNOLOGY,SC_TECHNOLOGY_DIRECTWRITE);sci(mapView,SCI_SETCODEPAGE,SC_CP_UTF8);}
     auto field=[](int id,const wchar_t* cue,DWORD style){HWND e=add(L"EDIT",L"",WS_TABSTOP|ES_AUTOHSCROLL|style,id);SendMessageW(e,EM_SETCUEBANNER,TRUE,(LPARAM)cue);SendMessageW(e,EM_SETMARGINS,EC_LEFTMARGIN|EC_RIGHTMARGIN,0);return e;};
     field(FindField,L"Find",0);field(ReplaceField,L"Replace",0);field(GoToText,L"Go to line",ES_NUMBER);
     SendMessageW(control(FindField),EM_SETLIMITTEXT,8192,0);SendMessageW(control(ReplaceField),EM_SETLIMITTEXT,8192,0);SendMessageW(control(GoToText),EM_SETLIMITTEXT,12,0);
@@ -470,7 +576,8 @@ void buildControls(){dpi=dpiOf(window);dark=theme==Theme::Dark||(theme==Theme::S
 }
 void editorNotification(SCNotification* n){
     HWND source=(HWND)n->nmhdr.hwndFrom;auto d=current();if(!d)return;
-    if(n->nmhdr.code==SCN_UPDATEUI){refreshNeeded=true;if(source==editor()){
+    if(n->nmhdr.code==SCN_FOCUSIN)updateMap();
+    if(n->nmhdr.code==SCN_UPDATEUI){refreshNeeded=true;if(source==editor()){if(n->updated&(SC_UPDATE_V_SCROLL|SC_UPDATE_CONTENT))updateMap();
         auto pos=sci(source,SCI_GETCURRENTPOS);Sci_Position brace=-1;
         for(auto candidate:{pos-1,pos})if(candidate>=0){int c=(int)sci(source,SCI_GETCHARAT,candidate);if(c&&strchr("[]{}()",c)){brace=candidate;break;}}
         if(brace>=0){auto other=sci(source,SCI_BRACEMATCH,brace,0);if(other>=0)sci(source,SCI_BRACEHIGHLIGHT,brace,other);else sci(source,SCI_BRACEBADLIGHT,brace);}else sci(source,SCI_BRACEHIGHLIGHT,(WPARAM)-1,-1);
@@ -534,7 +641,7 @@ int WINAPI wWinMain(HINSTANCE appInstance,HINSTANCE,PWSTR,int show){instance=app
     startIO();loadSettings();INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_TAB_CLASSES|ICC_BAR_CLASSES|ICC_STANDARD_CLASSES};InitCommonControlsEx(&controls);
     setAppDark(theme==Theme::Dark||(theme==Theme::System&&systemUsesDark()));
     WNDCLASSEXW cls{};cls.cbSize=sizeof(cls);cls.hInstance=instance;cls.lpfnWndProc=windowProc;cls.hCursor=LoadCursorW(nullptr,IDC_ARROW);cls.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1));cls.lpszClassName=L"NoteUltra.Main";RegisterClassExW(&cls);
-    registerClass(L"NoteUltra.Tabs",tabsProc,CS_DBLCLKS);registerClass(L"NoteUltra.Toolbar",toolsProc,CS_DBLCLKS);registerClass(L"NoteUltra.Status",statusProc);
+    registerClass(L"NoteUltra.Tabs",tabsProc,CS_DBLCLKS);registerClass(L"NoteUltra.Toolbar",toolsProc,CS_DBLCLKS);registerClass(L"NoteUltra.Status",statusProc);registerClass(L"NoteUltra.DocList",listProc,CS_DBLCLKS);registerClass(L"NoteUltra.Map",mapPanelProc);
     dpi=dpiOf(nullptr);
     HWND h=CreateWindowExW(WS_EX_ACCEPTFILES,cls.lpszClassName,L"NoteUltra",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,px(1280),px(850),nullptr,menu(),instance,nullptr);if(!h){stopIO();LocalFree(argv);return 1;}
     int code=0;
