@@ -91,3 +91,7 @@ CMake files are supplied for MinGW or Visual Studio, but that route has not been
 ## Microsoft Store
 
 MSIX manifest, assets, and packaging script are included. See [STORE.md](STORE.md). The app is unsigned and has not passed Store certification. Partner Center identity values and Windows SDK packaging tools are still required.
+
+## License
+
+[MIT](LICENSE).
